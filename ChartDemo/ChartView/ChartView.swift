@@ -1,24 +1,22 @@
-//
-//  ChartView.swift
-//  ChartDemo
-//
-//  Created by Khanh Vu on 25/3/25.
-//
-
 import UIKit
 import DGCharts
 import SnapKit
 
 final class ChartView: UIView {
     private var chartView: LineChartView!
-    private var data: [ChartPointModel] = []
-    var tickMarksView: TickMarksView!
+    private var tickMarksView: TickMarksView!
+    private var controlView: ControlView!
     
-    // Add crosshair views
+    private var data: [ChartPointModel] = []
+    
+    // Crosshair views
     private var markerInfoView: UIView!
     private var dateLabel: UILabel!
     private var peLabel: UILabel!
     private var indexLabel: UILabel!
+    
+    // Flag to prevent recursive updates
+    private var isUpdatingFromControlView = false
 
     //MARK: - init
     override init(frame: CGRect) {
@@ -35,21 +33,9 @@ final class ChartView: UIView {
 extension ChartView {
     func setUpUI() {
         if let chartModel = ChartModel.loadFromFile(named: "chart") {
-            // Use the parsed data
-            print("Success: \(chartModel.success)")
-            print("Message: \(chartModel.message)")
-            
-            // Access chart data
-            let dataPoints = chartModel.data.dataChart
-            print("Number of data points: \(dataPoints.count)")
-            
-            // Access current finance data
-            let currentFinance = chartModel.data.nowDataFinance
-            print("Current PE: \(currentFinance.pe)")
-            
             // Init chartView
             DispatchQueue.main.async {
-                self.data = getStrideData(dataPoints, step: 100)
+                self.data = chartModel.data.dataChart
                 self.setUpCharView()
             }
         } else {
@@ -58,13 +44,14 @@ extension ChartView {
     }
     
     func setUpCharView() {
+        // Initialize chart view
         chartView = LineChartView()
         addSubview(chartView)
         chartView.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview()
         }
         chartView.delegate = self
-
+        
         configureLineChart()
         configData()
         
@@ -76,8 +63,24 @@ extension ChartView {
             make.top.equalTo(chartView.snp.bottom).offset(-10)
             make.leading.trailing.equalToSuperview()
             make.height.equalTo(40)
-            make.bottom.equalToSuperview().offset(-40) // Above the period selector
         }
+        
+        // initialize control view
+        controlView = ControlView()
+        addSubview(controlView)
+        controlView.snp.makeConstraints { make in
+            make.top.equalTo(tickMarksView.snp.bottom).offset(10)
+            make.leading.trailing.equalToSuperview()
+            make.height.equalTo(40)
+        }
+        controlView.delegate = self // Set delegate
+        controlView.bindChartData(data)
+        
+        // Add info view at the top
+        addInfoView()
+        
+        // Add period selector at the bottom
+        addPeriodSelectorView()
         
         // Set initial tick positions and labels
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -89,22 +92,21 @@ extension ChartView {
     }
     
     func getSelectedXAxisPositions() -> ([CGFloat], [String]) {
-        guard let data = chartView.data?.first else {
+        guard let data = chartView.data?.first, data.entryCount != 0 else {
             return ([], [])
         }
         var positions: [CGFloat] = []
         var labels: [String] = []
-        let valueIndex: Int = self.data.count / 9
-        let valueIndexFirst : Int = self.data.count % 9
-        for i in 0...8
-        {
-            let indexShow = valueIndexFirst + (i * valueIndex)
-            let entry = data.entryForIndex(indexShow)
-            let xValue = entry?.x ?? 0
+        let valueIndex: Int = max(1, data.entryCount / 9)
+        let valueIndexFirst: Int = data.entryCount % 9
+        for i in 0...8 {
+            let indexShow = min(data.entryCount - 1, valueIndexFirst + (i * valueIndex))
+            guard let entry = data.entryForIndex(indexShow) else { continue }
+            let xValue = entry.x
             let pixelPosition = chartView.getTransformer(forAxis: .left).pixelForValues(x: xValue, y: 0)
             let adjustedX = pixelPosition.x - chartView.viewPortHandler.contentLeft
             positions.append(adjustedX)
-            labels.append(formattedDate(Int64(entry?.x ?? 0)))
+            labels.append(formattedDate(Int64(entry.x)))
         }
         return (positions, labels)
     }
@@ -131,9 +133,12 @@ extension ChartView {
         chartView.pinchZoomEnabled = false
         chartView.doubleTapToZoomEnabled = false
         
-        
+        // Enable highlighting on touch
         chartView.highlightPerDragEnabled = true
         chartView.highlightPerTapEnabled = true
+        chartView.dragXEnabled = true
+        chartView.dragYEnabled = false
+        
         // Configure X-Axis
         let xAxis = chartView.xAxis
         xAxis.labelPosition = .bottom
@@ -141,27 +146,112 @@ extension ChartView {
         xAxis.drawGridLinesEnabled = false
         xAxis.axisLineWidth = 0.5
         xAxis.axisLineColor = .black
-
+        
+        // Tính toán tỉ lệ giữa trục trái và trục phải
+        // Giả sử giá trị PE nằm trong khoảng 12-21, Index nằm trong khoảng 560-1200
+        // Xác định tỉ lệ chuyển đổi
+        let peToIndexRatio = 50.0 // Đây là một giá trị ước lượng, cần điều chỉnh dựa trên dữ liệu thực tế
+        
         // Configure Left Y-Axis (PE)
         let leftAxis = chartView.leftAxis
         leftAxis.drawAxisLineEnabled = false
         leftAxis.labelTextColor = UIColor(red: 0/255, green: 71/255, blue: 121/255, alpha: 1)
         leftAxis.drawGridLinesEnabled = true
         leftAxis.gridColor = UIColor.lightGray.withAlphaComponent(0.5)
-        leftAxis.granularityEnabled = true
+        
+        // Điều chỉnh để các nhãn thẳng hàng
+        leftAxis.labelCount = 6 // Số lượng nhãn hiển thị
+        leftAxis.forceLabelsEnabled = true
+        leftAxis.granularity = 1.0
         
         // Configure Right Y-Axis (Index)
         let rightAxis = chartView.rightAxis
         rightAxis.drawAxisLineEnabled = false
         rightAxis.labelTextColor = UIColor(red: 196/255, green: 26/255, blue: 22/255, alpha: 1)
         rightAxis.drawGridLinesEnabled = false
-        rightAxis.granularityEnabled = true
+        rightAxis.labelCount = 6 // Đảm bảo cùng số lượng nhãn
+        rightAxis.forceLabelsEnabled = true
         
-        // Add info view at the top
-        addInfoView()
+        // Đồng bộ hoá các trục (cần gọi sau khi đã có dữ liệu)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.synchronizeYAxes()
+        }
+    }
+    
+    // Thêm phương thức để đồng bộ hoá các trục Y
+    func synchronizeYAxes() {
+        guard let peDataSet = chartView.data?.dataSets[0] as? LineChartDataSet,
+              let indexDataSet = chartView.data?.dataSets[1] as? LineChartDataSet else {
+            return
+        }
         
-        // Add period selector at the bottom
-        addPeriodSelectorView()
+        // Lấy giá trị min/max của dữ liệu đang hiển thị
+        let peMin = peDataSet.yMin
+        let peMax = peDataSet.yMax
+        let indexMin = indexDataSet.yMin
+        let indexMax = indexDataSet.yMax
+        
+        // Tính tỉ lệ chuyển đổi
+        let ratio = (indexMax - indexMin) / (peMax - peMin)
+        
+        // Tính các giá trị cần thiết
+        let leftMin = peMin
+        let leftMax = peMax
+        let rightMin = indexMin
+        let rightMax = indexMax
+        
+        // Đặt giá trị phù hợp cho cả hai trục
+        // Đảm bảo số lượng nhãn và khoảng cách giữa các nhãn giống nhau
+        let leftRange = leftMax - leftMin
+        let rightRange = rightMax - rightMin
+        
+        let leftAxis = chartView.leftAxis
+        let rightAxis = chartView.rightAxis
+        
+        // Đặt số lượng nhãn giống nhau
+        let labelCount = 6
+        leftAxis.labelCount = labelCount
+        rightAxis.labelCount = labelCount
+        
+        // Tính khoảng cách giữa các nhãn
+        let leftInterval = leftRange / Double(labelCount - 1)
+        let rightInterval = rightRange / Double(labelCount - 1)
+        
+        // Đặt giá trị min/max và độ chia
+        leftAxis.axisMinimum = leftMin
+        leftAxis.axisMaximum = leftMax
+        leftAxis.granularity = leftInterval
+        
+        rightAxis.axisMinimum = rightMin
+        rightAxis.axisMaximum = rightMax
+        rightAxis.granularity = rightInterval
+        
+        // Đặt custom value formatter để đảm bảo việc hiển thị nhãn
+        leftAxis.valueFormatter = YAxisValueFormatter(baseValue: leftMin, interval: leftInterval, ratio: ratio)
+        rightAxis.valueFormatter = YAxisValueFormatter(baseValue: rightMin, interval: rightInterval, ratio: 1.0)
+        
+        chartView.notifyDataSetChanged()
+    }
+    
+    // Custom formatter class để kiểm soát cách hiển thị các giá trị trục Y
+    class YAxisValueFormatter: NSObject, AxisValueFormatter {
+        private let baseValue: Double
+        private let interval: Double
+        private let ratio: Double
+        
+        init(baseValue: Double, interval: Double, ratio: Double) {
+            self.baseValue = baseValue
+            self.interval = interval
+            self.ratio = ratio
+            super.init()
+        }
+        
+        func stringForValue(_ value: Double, axis: AxisBase?) -> String {
+            // Đảm bảo giá trị nằm tại các mốc cụ thể
+            let index = round((value - baseValue) / interval)
+            let alignedValue = baseValue + (index * interval)
+            return String(format: "%.1f", alignedValue)
+        }
     }
 
     func configData() {
@@ -180,18 +270,17 @@ extension ChartView {
         peDataSet.axisDependency = .left
         peDataSet.drawCirclesEnabled = false
         peDataSet.drawValuesEnabled = false
-        peDataSet.mode = .cubicBezier  // Smooth curves like in the image
+        peDataSet.mode = .cubicBezier
         peDataSet.highlightEnabled = true
         peDataSet.setColor(UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1))
-        peDataSet.setCircleColor(.green)
         peDataSet.lineWidth = 1
-        peDataSet.circleRadius = 3
         peDataSet.fillAlpha = 65/255
         peDataSet.fillColor = UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1)
         peDataSet.highlightColor = UIColor(red: 244/255, green: 117/255, blue: 117/255, alpha: 1)
-        peDataSet.drawCircleHoleEnabled = false
-//        peDataSet.drawHorizontalHighlightIndicatorEnabled = false
-//        peDataSet.drawVerticalHighlightIndicatorEnabled = false // We'll handle the highlight manually
+        peDataSet.drawHorizontalHighlightIndicatorEnabled = true
+        peDataSet.drawVerticalHighlightIndicatorEnabled = true
+        peDataSet.highlightLineDashLengths = [5, 2.5]
+        peDataSet.highlightLineWidth = 1.5
         
         // Configure Index data set (red line)
         let indexDataSet = LineChartDataSet(entries: indexDataEntry, label: "Index")
@@ -200,10 +289,12 @@ extension ChartView {
         indexDataSet.lineWidth = 1.5
         indexDataSet.drawCirclesEnabled = false
         indexDataSet.drawValuesEnabled = false
-        indexDataSet.mode = .cubicBezier  // Smooth curves like in the image
+        indexDataSet.mode = .cubicBezier
         indexDataSet.highlightEnabled = true
-//        indexDataSet.drawHorizontalHighlightIndicatorEnabled = false
-//        indexDataSet.drawVerticalHighlightIndicatorEnabled = false // We'll handle the highlight manually
+        indexDataSet.drawHorizontalHighlightIndicatorEnabled = true
+        indexDataSet.drawVerticalHighlightIndicatorEnabled = true
+        indexDataSet.highlightLineDashLengths = [5, 2.5]
+        indexDataSet.highlightLineWidth = 1.5
         
         let data: LineChartData = [peDataSet, indexDataSet]
         chartView.data = data
@@ -212,14 +303,14 @@ extension ChartView {
 
     // Add an info view at the top to display date and values
     func addInfoView() {
-        let infoView = UIView()
-        infoView.backgroundColor = UIColor.lightGray.withAlphaComponent(0.1)
-        infoView.layer.cornerRadius = 5
-        infoView.layer.borderWidth = 1
-        infoView.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.3).cgColor
-        addSubview(infoView)
+        markerInfoView = UIView()
+        markerInfoView.backgroundColor = UIColor.lightGray.withAlphaComponent(0.1)
+        markerInfoView.layer.cornerRadius = 5
+        markerInfoView.layer.borderWidth = 1
+        markerInfoView.layer.borderColor = UIColor.lightGray.withAlphaComponent(0.3).cgColor
+        addSubview(markerInfoView)
         
-        infoView.snp.makeConstraints { make in
+        markerInfoView.snp.makeConstraints { make in
             make.top.equalToSuperview().offset(10)
             make.leading.equalToSuperview().offset(10)
             make.height.equalTo(30)
@@ -228,7 +319,7 @@ extension ChartView {
         dateLabel = UILabel()
         dateLabel.text = "Ngày: 14/1/2019"
         dateLabel.font = UIFont.systemFont(ofSize: 12)
-        infoView.addSubview(dateLabel)
+        markerInfoView.addSubview(dateLabel)
         
         dateLabel.snp.makeConstraints { make in
             make.leading.equalToSuperview().offset(10)
@@ -239,7 +330,7 @@ extension ChartView {
         peLabel.text = "• PE: 14.87"
         peLabel.font = UIFont.systemFont(ofSize: 12)
         peLabel.textColor = UIColor(red: 0/255, green: 71/255, blue: 121/255, alpha: 1)
-        infoView.addSubview(peLabel)
+        markerInfoView.addSubview(peLabel)
         
         peLabel.snp.makeConstraints { make in
             make.leading.equalTo(dateLabel.snp.trailing).offset(10)
@@ -250,7 +341,7 @@ extension ChartView {
         indexLabel.text = "• Index: 904.87"
         indexLabel.font = UIFont.systemFont(ofSize: 12)
         indexLabel.textColor = UIColor(red: 196/255, green: 26/255, blue: 22/255, alpha: 1)
-        infoView.addSubview(indexLabel)
+        markerInfoView.addSubview(indexLabel)
         
         indexLabel.snp.makeConstraints { make in
             make.leading.equalTo(peLabel.snp.trailing).offset(10)
@@ -269,6 +360,7 @@ extension ChartView {
             make.leading.trailing.equalToSuperview()
             make.bottom.equalToSuperview()
             make.height.equalTo(40)
+            make.top.equalTo(controlView.snp.bottom).offset(10)
         }
         
         let stackView = UIStackView()
@@ -317,6 +409,9 @@ extension ChartView {
         // Update chart data based on selected period
         let period = sender.tag
         
+        // Set flag to prevent recursive updates
+        isUpdatingFromControlView = true
+        
         switch period {
         case 0: // 1w
             filterDataForPeriod(days: 7)
@@ -337,6 +432,8 @@ extension ChartView {
         default:
             break
         }
+        
+        isUpdatingFromControlView = false
     }
 
     func filterDataForPeriod(days: Int) {
@@ -364,6 +461,8 @@ extension ChartView {
     }
 
     func updateChart(with filteredData: [ChartPointModel]) {
+        guard !filteredData.isEmpty else { return }
+        
         // Update PE data
         let peDataEntry = filteredData.map {
             ChartDataEntry(x: Double($0.timeStamp), y: $0.pe)
@@ -381,13 +480,30 @@ extension ChartView {
         if let indexDataSet = chartView.data?.dataSets[1] as? LineChartDataSet {
             indexDataSet.replaceEntries(indexDataEntry)
         }
-        
 
-        // Update X-axis tick marks
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            self.chartView.notifyDataSetChanged()
-            self.chartView.fitScreen()
+        // Tìm giá trị min và max của trục X
+        if let minX = filteredData.min(by: { $0.timeStamp < $1.timeStamp })?.timeStamp,
+           let maxX = filteredData.max(by: { $0.timeStamp < $1.timeStamp })?.timeStamp {
             
+            // Cập nhật phạm vi trục X
+            chartView.xAxis.axisMinimum = Double(minX)
+            chartView.xAxis.axisMaximum = Double(maxX)
+            
+            // Thông báo cập nhật dữ liệu
+            chartView.notifyDataSetChanged()
+            
+            // Hiển thị toàn bộ dữ liệu mới
+            chartView.setVisibleXRange(minXRange: Double(maxX - minX), maxXRange: Double(maxX - minX))
+            chartView.moveViewToX(Double(minX))
+        } else {
+            chartView.notifyDataSetChanged()
+            chartView.fitScreen()
+        }
+        
+        // Update X-axis tick marks
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            self.synchronizeYAxes()
+
             let (positions, labels) = self.getSelectedXAxisPositions()
             self.tickMarksView.tickPositions = positions
             self.tickMarksView.tickLabels = labels
@@ -428,31 +544,50 @@ extension ChartView {
         dateLabel.text = "Ngày: \(dateString)"
         peLabel.text = "• PE: \(String(format: "%.2f", peValue))"
         indexLabel.text = "• Index: \(String(format: "%.2f", indexValue))"
+        markerInfoView.isHidden = false
     }
 }
 
-// MARK: - Delegate
+// MARK: - Chart Delegates
 extension ChartView: ChartViewDelegate {
     func chartValueSelected(_ chartView: ChartViewBase, entry: ChartDataEntry, highlight: Highlight) {
-        NSLog("chartValueSelected");
+        updateInfoLabels(with: entry, highlight: highlight)
     }
     
     func chartValueNothingSelected(_ chartView: ChartViewBase) {
-        NSLog("chartValueNothingSelected");
+        markerInfoView.isHidden = true
     }
     
     func chartScaled(_ chartView: ChartViewBase, scaleX: CGFloat, scaleY: CGFloat) {
-        NSLog("chartScaled");
-
+        // Update tick marks after scaling
+        let (positions, labels) = self.getSelectedXAxisPositions()
+        self.tickMarksView.tickPositions = positions
+        self.tickMarksView.tickLabels = labels
+        self.tickMarksView.setNeedsDisplay()
     }
-    
-    func chartTranslated(_ chartView: ChartViewBase, dX: CGFloat, dY: CGFloat) {
-        NSLog("chartTranslated");
+}
 
-    }
-    
-    func chartViewDidEndPanning(_ chartView: ChartViewBase) {
-        NSLog("chartViewDidEndPanning");
-
+// MARK: - Control View Delegate
+extension ChartView: ControlViewDelegate {
+    func controlView(_ controlView: ControlView, didUpdateRange range: (start: Double, end: Double)) {
+        // Set flag to prevent recursive updates
+        isUpdatingFromControlView = true
+        
+        // Filter data based on selected range
+        let filteredData = self.data.filter {
+            Double($0.timeStamp) >= range.start && Double($0.timeStamp) <= range.end
+        }
+        
+        // Update chart with filtered data
+        updateChart(with: filteredData)
+        
+        // Reset flag
+        isUpdatingFromControlView = false
+        
+        // Update the info view with the first visible point
+        if let firstEntry = chartView.data?.dataSets[0].entryForIndex(0) {
+            let highlightObj = Highlight(x: firstEntry.x, y: firstEntry.y, dataSetIndex: 0)
+            updateInfoLabels(with: firstEntry, highlight: highlightObj)
+        }
     }
 }
