@@ -21,7 +21,11 @@ final class ControlView: UIView {
     
     private var data: [ChartPointModel] = []
     private var isDragging = false
-    private var stickPanWidth: CGFloat = 20
+    private var stickPanWidth: CGFloat = 10
+    private var stickPanHeight: CGFloat = 18
+
+    private let lineColor: UIColor = .red
+    private let fillColor: UIColor = .red.withAlphaComponent(0.6)
     weak var delegate: ControlViewDelegate?
      
     override init(frame: CGRect) {
@@ -43,7 +47,7 @@ final class ControlView: UIView {
     }
     
     func bindChartData(_ data: [ChartPointModel]) {
-        self.data = data.reversed()
+        self.data = data
         let peDataEntry = getStrideData(data, step: 10).map {
             ChartDataEntry(x: Double($0.timeStamp), y: $0.pe)
         }
@@ -57,34 +61,32 @@ final class ControlView: UIView {
         resetOverlayPosition()
     }
     
+    func updateOverlay(_ update: [ChartPointModel]) {
+        let filtered = update
+        guard let firstIndex = data.firstIndex(where: {$0.timeStamp == filtered.first?.timeStamp}) else {
+            return
+        }
+        let minX = (CGFloat(firstIndex) / CGFloat(data.count - 1)) * (bounds.width - stickPanWidth) + stickPanWidth / 2
+        let newWidth = (CGFloat(filtered.count) / CGFloat(data.count)) * (bounds.width - stickPanWidth)
+        overlayView.frame = .init(x: minX, y: 0, width: newWidth, height: bounds.height)
+    }
+    
     private func configureDataSet(_ dataSet: LineChartDataSet) {
         dataSet.axisDependency = .left
         dataSet.drawCirclesEnabled = false
         dataSet.drawValuesEnabled = false
         dataSet.mode = .cubicBezier  // Smooth curves like in the image
         dataSet.highlightEnabled = false
-        dataSet.setColor(UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1))
+        dataSet.setColor(lineColor)
         dataSet.lineWidth = 0.5
         dataSet.fillAlpha = 65/255
-        dataSet.fillColor = UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1)
-        dataSet.highlightColor = UIColor(red: 244/255, green: 117/255, blue: 117/255, alpha: 1)
+        dataSet.fillColor = fillColor
         dataSet.drawCircleHoleEnabled = false
         dataSet.drawFilledEnabled = true
     }
     
     private func resetOverlayPosition() {
         overlayView.frame = .init(x: stickPanWidth/2, y: 0, width: bounds.width - stickPanWidth, height: bounds.height)
-        updateHandlePositions()
-    }
-    
-    private func updateHandlePositions() {
-        leftHandleView.snp.updateConstraints { make in
-            make.centerX.equalTo(overlayView.snp.leading)
-        }
-        
-        rightHandleView.snp.updateConstraints { make in
-            make.centerX.equalTo(overlayView.snp.trailing)
-        }
     }
 }
 
@@ -97,7 +99,8 @@ private extension ControlView {
     func setUpBgChartView() {
         addSubview(bgChartView)
         bgChartView.snp.makeConstraints { make in
-            make.edges.equalToSuperview()
+            make.leading.trailing.equalToSuperview()
+            make.top.bottom.equalToSuperview().inset(-10)
         }
         
         configureChartView()
@@ -139,14 +142,14 @@ private extension ControlView {
             make.centerY.equalToSuperview()
             make.centerX.equalTo(overlayView.snp.leading)
             make.width.equalTo(stickPanWidth)
-            make.height.equalTo(30)
+            make.height.equalTo(stickPanHeight)
         }
         
         rightHandleView.snp.makeConstraints { make in
             make.centerY.equalToSuperview()
             make.centerX.equalTo(overlayView.snp.trailing)
             make.width.equalTo(stickPanWidth)
-            make.height.equalTo(30)
+            make.height.equalTo(stickPanHeight)
         }
         
         // Add a drag gesture to the overlay view itself for moving the entire selection
@@ -158,19 +161,19 @@ private extension ControlView {
         let v = UIView()
         v.layer.borderWidth = 1
         v.layer.borderColor = UIColor.darkGray.cgColor
-        v.backgroundColor = .lightGray
-        v.layer.cornerRadius = 3
+        v.backgroundColor = .lightGray.withAlphaComponent(0.3)
         
         // Add a vertical line in the center to make it look like a handle
-        let lineView = UIView()
-        lineView.backgroundColor = .darkGray
-        v.addSubview(lineView)
-        lineView.snp.makeConstraints { make in
-            make.center.equalToSuperview()
-            make.width.equalTo(2)
-            make.height.equalTo(15)
-        }
+        let lineLayer1 = CALayer()
+        lineLayer1.backgroundColor = UIColor.darkGray.cgColor
+        lineLayer1.frame = .init(x: stickPanWidth / 2 - 2, y: 4, width: 1, height: stickPanHeight - 8)
         
+        let lineLayer2 = CALayer()
+        lineLayer2.backgroundColor = UIColor.darkGray.cgColor
+        lineLayer2.frame = .init(x: stickPanWidth / 2 + 1, y: 4, width: 1, height: stickPanHeight - 8)
+        
+        v.layer.addSublayer(lineLayer1)
+        v.layer.addSublayer(lineLayer2)
         return v
     }
     
@@ -182,9 +185,8 @@ private extension ControlView {
             overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
         }
         
-        let newX = max(stickPanWidth / 2, min(overlayView.frame.maxX - 20, overlayView.frame.minX + translation.x))
+        let newX = max(stickPanWidth / 2, min(overlayView.frame.maxX, overlayView.frame.minX + translation.x))
         let newWidth = overlayView.frame.maxX - newX
-        
         overlayView.frame = CGRect(
             x: newX,
             y: overlayView.frame.minY,
@@ -193,7 +195,6 @@ private extension ControlView {
         )
         
         gesture.setTranslation(.zero, in: self)
-//        updateHandlePositions()
         
         if gesture.state == .ended {
             isDragging = false
@@ -212,7 +213,7 @@ private extension ControlView {
             overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
         }
         
-        let minWidth = 20.0
+        let minWidth = 0.0
         let maxWidth = bounds.width - stickPanWidth / 2 - overlayView.frame.minX
         let newWidth = max(minWidth, min(maxWidth, overlayView.frame.width + translation.x))
         
@@ -224,7 +225,6 @@ private extension ControlView {
         )
         
         gesture.setTranslation(.zero, in: self)
-        updateHandlePositions()
         
         if gesture.state == .ended {
             isDragging = false
@@ -253,7 +253,6 @@ private extension ControlView {
         )
         
         gesture.setTranslation(.zero, in: self)
-        updateHandlePositions()
         
         if gesture.state == .ended {
             isDragging = false
