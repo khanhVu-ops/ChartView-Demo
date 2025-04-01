@@ -3,12 +3,16 @@ import DGCharts
 import SnapKit
 
 final class ChartView: UIView {
+    private var containerChartView: UIView!
     private var chartView: LineChartView!
     private var tickMarksView: TickMarksView!
     private var controlView: ControlView!
-    
+    private var periodSelectorView: UIView!
+    private var periodButtons: [UIButton] = []
     private var data: [ChartPointModel] = []
-    
+    private var tickPositions: [CGFloat] = [] // Vị trí tick marks trên X-axis
+    private var tickLabel: [String] = [] // Vị trí tick marks trên X-axis
+
     // Crosshair views
     private var markerInfoView: UIView!
     private var dateLabel: UILabel!
@@ -31,6 +35,24 @@ final class ChartView: UIView {
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setUpUI()
+    }
+    
+    // Bind Data
+    func bindData(_ data: [ChartPointModel]) {
+        self.data = data
+        // configure data chart
+        configureChartData()
+        
+        // bind control data
+        controlView.bindChartData(data)
+
+        // update tick label x axis after update data
+        updateTickMarksAfterChangeData()
+        
+        // Default show 1m
+        if let lastThreeMonthButton = periodButtons.first(where: {$0.titleLabel?.text == "3m"}) {
+            periodButtonTapped(lastThreeMonthButton)
+        }
     }
 }
 
@@ -88,44 +110,19 @@ private extension ChartView {
         markerInfoView.isHidden = true
     }
     
-    func addControlView() {
-        controlView = ControlView()
-        addSubview(controlView)
-        controlView.snp.makeConstraints { make in
-            make.top.equalTo(tickMarksView.snp.bottom).offset(10)
-            make.leading.trailing.equalToSuperview()
-            make.height.equalTo(25)
-        }
-        controlView.delegate = self // Set delegate
-        controlView.bindChartData(data)
-    }
-    
-    // Initialize tick mark label x axis
-    func addTickMarksView() {
-        // Initialize tickMarksView
-        tickMarksView = TickMarksView()
-        tickMarksView.backgroundColor = .clear
-        addSubview(tickMarksView)
-        tickMarksView.snp.makeConstraints { make in
-            make.top.equalTo(chartView.snp.bottom).offset(-10)
-            make.leading.trailing.equalToSuperview()
-            make.height.equalTo(40)
-        }
-    }
-    
     // Update Tick mark label X Axis
     func updateTickMarksAfterChangeData() {
         DispatchQueue.main.async {
-            let (positions, labels) = self.getSelectedXAxisPositions()
-            self.tickMarksView.tickPositions = positions
-            self.tickMarksView.tickLabels = labels
+//            let (positions, labels) = self.getSelectedXAxisPositions()
+            self.tickMarksView.tickPositions = self.tickPositions
+            self.tickMarksView.tickLabels = self.tickLabel
             self.tickMarksView.setNeedsDisplay()
         }
     }
 
     // Add period selector at the bottom
     func addPeriodSelectorView() {
-        let periodSelectorView = UIView()
+        periodSelectorView = UIView()
         periodSelectorView.backgroundColor = .lightGray.withAlphaComponent(0.2)
         periodSelectorView.layer.cornerRadius = 5
 
@@ -135,7 +132,6 @@ private extension ChartView {
             make.leading.trailing.equalToSuperview()
             make.bottom.equalToSuperview()
             make.height.equalTo(25)
-            make.top.equalTo(controlView.snp.bottom).offset(10)
         }
         
         let stackView = UIStackView()
@@ -157,7 +153,6 @@ private extension ChartView {
             button.titleLabel?.font = UIFont.systemFont(ofSize: 12)
             button.tag = index
             button.addTarget(self, action: #selector(periodButtonTapped(_:)), for: .touchUpInside)
-            
             // Highlight the "All" button by default based on the image
             if period == "All" {
                 button.backgroundColor = UIColor.lightGray.withAlphaComponent(0.2)
@@ -165,6 +160,7 @@ private extension ChartView {
             }
             
             stackView.addArrangedSubview(button)
+            periodButtons.append(button)
         }
     }
 
@@ -213,46 +209,53 @@ private extension ChartView {
 
 extension ChartView {
     func setUpUI() {
-        if let chartModel = ChartModel.loadFromFile(named: "chart") {
-            // Init chartView
-            DispatchQueue.main.async {
-                self.data = chartModel.data.dataChart.sorted(by: {$0.timeStamp < $1.timeStamp})
-                self.initChartView()
-            }
-        } else {
-            print("Failed to load chart data")
+        backgroundColor = .white
+        // Add period selector at the bottom
+        addPeriodSelectorView()
+        
+        // Initialize container chart view
+        containerChartView = UIView()
+        addSubview(containerChartView)
+        containerChartView.snp.makeConstraints { make in
+            make.top.leading.trailing.equalToSuperview()
+            make.bottom.equalTo(periodSelectorView.snp.top).offset(-10)
         }
-    }
-    
-    func initChartView() {
-        // Initialize chart view
+        let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
+        containerChartView.addGestureRecognizer(pinchGesture)
+        
+        // Init chartView
         chartView = LineChartView()
-        addSubview(chartView)
+        containerChartView.addSubview(chartView)
         chartView.snp.makeConstraints { make in
             make.top.leading.trailing.equalToSuperview()
         }
+
         chartView.delegate = self
-        
         // configure line chart
         configureLineChart()
         
-        // configure data chart
-        configData()
-        
-        // Add Mark Axis Label View
-        addTickMarksView()
-        
-        // update tick label x axis after update data
-        updateTickMarksAfterChangeData()
+        // Initialize tickMarksView Add Mark Axis Label View
+        tickMarksView = TickMarksView()
+        tickMarksView.backgroundColor = .clear
+        containerChartView.addSubview(tickMarksView)
+        tickMarksView.snp.makeConstraints { make in
+            make.top.equalTo(chartView.snp.bottom).offset(-10)
+            make.leading.trailing.equalToSuperview()
+            make.height.equalTo(30)
+        }
         
         // initialize control view
-        addControlView()
+        controlView = ControlView()
+        containerChartView.addSubview(controlView)
+        controlView.snp.makeConstraints { make in
+            make.top.equalTo(tickMarksView.snp.bottom)
+            make.height.equalTo(25)
+            make.leading.trailing.bottom.equalToSuperview()
+        }
+        controlView.delegate = self // Set delegate
         
         // Add info view at the top
         addInfoView()
-        
-        // Add period selector at the bottom
-        addPeriodSelectorView()
     }
     
     func getSelectedXAxisPositions() -> ([CGFloat], [String]) {
@@ -291,10 +294,10 @@ extension ChartView {
         chartView.chartDescription.enabled = false
         
         // Configure navigation features
-        chartView.scaleXEnabled = true
+        chartView.scaleXEnabled = false
         chartView.scaleYEnabled = false
         chartView.dragEnabled = true
-        chartView.pinchZoomEnabled = true
+        chartView.pinchZoomEnabled = false
         chartView.doubleTapToZoomEnabled = false
         
         // Enable highlighting on touch
@@ -302,15 +305,15 @@ extension ChartView {
         chartView.highlightPerTapEnabled = true
         chartView.dragXEnabled = true
         chartView.dragYEnabled = false
-        
         // Configure X-Axis
         let xAxis = chartView.xAxis
         xAxis.labelPosition = .bottom
         xAxis.drawLabelsEnabled = false
+        xAxis.axisMaxLabels = 10
         xAxis.drawGridLinesEnabled = false
         xAxis.axisLineWidth = 0.5
         xAxis.axisLineColor = .black
-        
+
         // Configure Left Y-Axis (PE)
         let leftAxis = chartView.leftAxis
         leftAxis.drawAxisLineEnabled = false
@@ -319,8 +322,7 @@ extension ChartView {
         leftAxis.gridColor = UIColor.lightGray.withAlphaComponent(0.5)
         leftAxis.drawBottomYLabelEntryEnabled = false
         leftAxis.drawTopYLabelEntryEnabled = false
-//        leftAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
-//        leftAxis.spaceBottom = 0.1 // Thêm 5% khoảng trống phía dưới
+
         // Điều chỉnh để các nhãn thẳng hàng
         leftAxis.forceLabelsEnabled = true
         leftAxis.granularity = 0.05
@@ -331,14 +333,13 @@ extension ChartView {
         rightAxis.labelTextColor = UIColor(red: 196/255, green: 26/255, blue: 22/255, alpha: 1)
         rightAxis.drawGridLinesEnabled = true
         rightAxis.forceLabelsEnabled = true
-//        rightAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
-//        rightAxis.spaceBottom = 0.2 // Thêm 5% khoảng trống phía dưới
+
         rightAxis.drawBottomYLabelEntryEnabled = false
         rightAxis.drawTopYLabelEntryEnabled = false
 
     }
 
-    func configData() {
+    func configureChartData() {
         // Data set for PE line
         let peDataEntry = data.map {
             ChartDataEntry(x: Double($0.timeStamp), y: $0.pe)
@@ -382,7 +383,7 @@ extension ChartView {
         indexDataSet.highlightLineWidth = 1
         let data: LineChartData = [peDataSet, indexDataSet]
         chartView.data = data
-        chartView.data!.isHighlightEnabled = true
+//        chartView.xAxis.valueFormatter = DayAxisValueFormatter(chart: chartView)
     }
 
     func filterDataForPeriod(days: Int) {
@@ -477,10 +478,30 @@ extension ChartView {
         chartView.notifyDataSetChanged()
         chartView.fitScreen()
         
+        getXLabelPositions()
+        
         // Cập nhật tick marks
         updateTickMarksAfterChangeData()
     }
 
+    func getXLabelPositions() {
+        var labelPositions: [CGFloat] = []
+
+        // Lấy các giá trị hiển thị trên trục X
+        let xEntries = chartView.xAxis.entries
+        tickLabel = xEntries.map { formattedDate(Int64($0)) }
+        // Sử dụng Transformer để chuyển đổi giá trị X thành tọa độ
+        let transformer = chartView.getTransformer(forAxis: .left)
+
+        for xValue in xEntries {
+            // Chuyển đổi từ giá trị X sang tọa độ màn hình (pixel)
+            let point = transformer.pixelForValues(x: xValue, y: 0.0)
+            labelPositions.append(point.x)
+            print("Label tại giá trị x = \(xValue) có vị trí: \(point)")
+        }
+        tickPositions = labelPositions
+    }
+    
     // Update info labels with highlighted values
     func updateInfoLabels(with entry: ChartDataEntry, highlight: Highlight) {
         let peValue: Double
@@ -557,6 +578,27 @@ extension ChartView {
             }
         }
     }
+    
+    @objc func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
+        
+
+        if gesture.state == .ended || gesture.state == .cancelled {
+            print("Zôm end \(getZoomedData().count)")
+            let filteredData = getZoomedData()
+            updateChart(with: filteredData)
+        } else if gesture.state == .changed {
+            let location = gesture.location(in: self)
+            let scale = gesture.scale
+            print("before zoom")
+            chartView.zoom(scaleX: scale, scaleY: 1, x: location.x, y: location.y)
+            gesture.scale = 1
+            print("after zoom")
+        }
+    }
+    
+    func getZoomedData() -> [ChartPointModel] {
+        return data.filter { $0.timeStamp >= Int64(chartView.lowestVisibleX) && $0.timeStamp <= Int64(chartView.highestVisibleX) }
+    }
 }
 
 // MARK: - Chart Delegates
@@ -628,8 +670,4 @@ extension ChartView: ControlViewDelegate {
         // Reset flag
         isUpdatingFromControlView = false
     }
-}
-
-func roundDownToNearestTen(_ number: CGFloat) -> CGFloat {
-    return number < 10 ? number : (number / 10) * 10
 }

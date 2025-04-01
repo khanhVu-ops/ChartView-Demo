@@ -13,6 +13,18 @@ class ViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         
+        
+    }
+    
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        rotateViewLanscape()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            self.setUpUI()
+        }
+    }
+    
+    func rotateViewLanscape() {
         let appDel = UIApplication.shared.delegate as! AppDelegate
         appDel.orientationLock = .landscape
 
@@ -31,12 +43,20 @@ class ViewController: UIViewController {
          }
     }
     
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        
+    func setUpUI() {
         view.addSubview(chartView)
         chartView.snp.makeConstraints { make in
             make.edges.equalTo(view.safeAreaLayoutGuide)
+        }
+        
+        if let chartModel = ChartModel.loadFromFile(named: "chart") {
+            // Init chartView
+            DispatchQueue.main.async {
+                let data = chartModel.data.dataChart.sorted(by: {$0.timeStamp < $1.timeStamp})
+                self.chartView.bindData(data)
+            }
+        } else {
+            print("Failed to load chart data")
         }
     }
 }

@@ -36,7 +36,7 @@ struct ChartPointModel: Decodable {
     let pe, index: Double
     let lnst: Int
     let time: String
-    let timeStamp: Int
+    let timeStamp: Int64
 
     enum CodingKeys: String, CodingKey {
         case pe = "Pe"
