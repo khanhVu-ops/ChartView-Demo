@@ -83,6 +83,9 @@ private extension ChartView {
             make.centerY.equalToSuperview()
             make.trailing.equalToSuperview().offset(-10)
         }
+        
+        // default hidden
+        markerInfoView.isHidden = true
     }
     
     func addControlView() {
@@ -314,27 +317,24 @@ extension ChartView {
         leftAxis.drawGridLinesEnabled = false
         leftAxis.labelTextColor = UIColor(red: 0/255, green: 71/255, blue: 121/255, alpha: 1)
         leftAxis.gridColor = UIColor.lightGray.withAlphaComponent(0.5)
-        
+        leftAxis.drawBottomYLabelEntryEnabled = false
+        leftAxis.drawTopYLabelEntryEnabled = false
+//        leftAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
+//        leftAxis.spaceBottom = 0.1 // Thêm 5% khoảng trống phía dưới
         // Điều chỉnh để các nhãn thẳng hàng
-        leftAxis.axisMinLabels = 5 // Số lượng nhãn hiển thị
         leftAxis.forceLabelsEnabled = true
-        leftAxis.granularity = 0.2
-        leftAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
-        leftAxis.spaceBottom = 0.05 // Thêm 5% khoảng trống phía dưới
-//        leftAxis.a = true
+        leftAxis.granularity = 0.05
 
         // Configure Right Y-Axis (Index)
         let rightAxis = chartView.rightAxis
         rightAxis.drawAxisLineEnabled = false
         rightAxis.labelTextColor = UIColor(red: 196/255, green: 26/255, blue: 22/255, alpha: 1)
         rightAxis.drawGridLinesEnabled = true
-        rightAxis.axisMinLabels = 5 // Đảm bảo cùng số lượng nhãn
         rightAxis.forceLabelsEnabled = true
-        rightAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
-        rightAxis.spaceBottom = 0.05 // Thêm 5% khoảng trống phía dưới
-//        rightAxis.avoidFirstLastClippingEnabled = true
-
-        chartView.setScaleMinima(0.9, scaleY: 1.0)
+//        rightAxis.spaceTop = 0.1 // Thêm 10% khoảng trống phía trên
+//        rightAxis.spaceBottom = 0.2 // Thêm 5% khoảng trống phía dưới
+        rightAxis.drawBottomYLabelEntryEnabled = false
+        rightAxis.drawTopYLabelEntryEnabled = false
 
     }
 
@@ -448,14 +448,14 @@ extension ChartView {
            let maxIndex = filteredData.max(by: { $0.index < $1.index })?.index {
             
             // Thêm padding để đồ thị có khoảng trống ở trên và dưới
-            let peRange = maxPe - minPe
-            let indexRange = maxIndex - minIndex
+            let peRange = (maxPe - minPe) * 0.2
+            let indexRange = (maxIndex - minIndex) * 0.2
             
-            let minPeWithPadding = minPe - (peRange * 0.05)
-            let maxPeWithPadding = maxPe + (peRange * 0.1)
+            let minPeWithPadding = minPe - peRange
+            let maxPeWithPadding = maxPe + peRange
             
-            let minIndexWithPadding = minIndex - (indexRange * 0.05)
-            let maxIndexWithPadding = maxIndex + (indexRange * 0.1)
+            let minIndexWithPadding = minIndex - indexRange
+            let maxIndexWithPadding = maxIndex + indexRange
             
             // Cập nhật phạm vi trục Y
             chartView.leftAxis.axisMinimum = Double(minPeWithPadding)
@@ -471,7 +471,8 @@ extension ChartView {
             chartView.xAxis.axisMinimum = Double(minX)
             chartView.xAxis.axisMaximum = Double(maxX)
         }
-        
+//        chartView.move.animate(xAxisDuration: 0.5, yAxisDuration: 0.5)
+
         // Cập nhật dữ liệu biểu đồ và reset view
         chartView.notifyDataSetChanged()
         chartView.fitScreen()
@@ -626,11 +627,9 @@ extension ChartView: ControlViewDelegate {
         
         // Reset flag
         isUpdatingFromControlView = false
-        
-        // Update the info view with the first visible point
-        if let firstEntry = chartView.data?.dataSets[0].entryForIndex(0) {
-            let highlightObj = Highlight(x: firstEntry.x, y: firstEntry.y, dataSetIndex: 0)
-            updateInfoLabels(with: firstEntry, highlight: highlightObj)
-        }
     }
+}
+
+func roundDownToNearestTen(_ number: CGFloat) -> CGFloat {
+    return number < 10 ? number : (number / 10) * 10
 }

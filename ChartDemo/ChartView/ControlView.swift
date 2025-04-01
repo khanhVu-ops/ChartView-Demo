@@ -42,8 +42,11 @@ final class ControlView: UIView {
         super.layoutSubviews()
         // Update overlay frame if needed
         if overlayView.frame == CGRect.zero {
-            overlayView.frame = .init(x: stickPanWidth/2, y: 0, width: bounds.width - stickPanWidth, height: bounds.height)
+            resetOverlayPosition()
         }
+        
+        // Update handle positions
+        updateHandlePositions()
     }
     
     func bindChartData(_ data: [ChartPointModel]) {
@@ -59,6 +62,7 @@ final class ControlView: UIView {
         // Reset overlay position when new data is bound
         layoutIfNeeded()
         resetOverlayPosition()
+        updateHandlePositions()
     }
     
     func updateOverlay(_ update: [ChartPointModel]) {
@@ -69,6 +73,7 @@ final class ControlView: UIView {
         let minX = (CGFloat(firstIndex) / CGFloat(data.count - 1)) * (bounds.width - stickPanWidth) + stickPanWidth / 2
         let newWidth = (CGFloat(filtered.count) / CGFloat(data.count)) * (bounds.width - stickPanWidth)
         overlayView.frame = .init(x: minX, y: 0, width: newWidth, height: bounds.height)
+        updateHandlePositions()
     }
     
     private func configureDataSet(_ dataSet: LineChartDataSet) {
@@ -87,6 +92,12 @@ final class ControlView: UIView {
     
     private func resetOverlayPosition() {
         overlayView.frame = .init(x: stickPanWidth/2, y: 0, width: bounds.width - stickPanWidth, height: bounds.height)
+        updateHandlePositions()
+    }
+    
+    private func updateHandlePositions() {
+        leftHandleView.center = CGPoint(x: overlayView.frame.minX, y: bounds.height / 2)
+        rightHandleView.center = CGPoint(x: overlayView.frame.maxX, y: bounds.height / 2)
     }
 }
 
@@ -94,13 +105,15 @@ private extension ControlView {
     func setUpUI() {
         setUpBgChartView()
         setUpOverlayDragable()
+        setupPinchGesture()
+        setupTapGesture()
     }
     
     func setUpBgChartView() {
         addSubview(bgChartView)
         bgChartView.snp.makeConstraints { make in
-            make.leading.trailing.equalToSuperview()
-            make.top.bottom.equalToSuperview().inset(-10)
+            make.leading.trailing.equalToSuperview().inset(stickPanWidth/2)
+            make.top.bottom.equalToSuperview()
         }
         
         configureChartView()
@@ -118,6 +131,9 @@ private extension ControlView {
         bgChartView.pinchZoomEnabled = false
         bgChartView.doubleTapToZoomEnabled = false
         bgChartView.backgroundColor = .clear
+        
+        bgChartView.setViewPortOffsets(left: 0, top: 0, right: 0, bottom: 0)
+
     }
     
     func setUpOverlayDragable() {
@@ -137,31 +153,28 @@ private extension ControlView {
         rightHandleView.addGestureRecognizer(UIPanGestureRecognizer(target: self, action: #selector(rightPanGesture(_:))))
         addSubview(rightHandleView)
         
-        // Position handles
-        leftHandleView.snp.makeConstraints { make in
-            make.centerY.equalToSuperview()
-            make.centerX.equalTo(overlayView.snp.leading)
-            make.width.equalTo(stickPanWidth)
-            make.height.equalTo(stickPanHeight)
-        }
-        
-        rightHandleView.snp.makeConstraints { make in
-            make.centerY.equalToSuperview()
-            make.centerX.equalTo(overlayView.snp.trailing)
-            make.width.equalTo(stickPanWidth)
-            make.height.equalTo(stickPanHeight)
-        }
-        
         // Add a drag gesture to the overlay view itself for moving the entire selection
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(overlayPanGesture(_:)))
         overlayView.addGestureRecognizer(panGesture)
     }
+    
+    func setupPinchGesture() {
+        let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
+        addGestureRecognizer(pinchGesture)
+    }
+    
+    func setupTapGesture() {
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(handleTapGesture(_:)))
+        bgChartView.addGestureRecognizer(tapGesture)
+    }
+
     
     func createStickDragView() -> UIView {
         let v = UIView()
         v.layer.borderWidth = 1
         v.layer.borderColor = UIColor.darkGray.cgColor
         v.backgroundColor = .lightGray.withAlphaComponent(0.3)
+        v.frame = CGRect(x: 0, y: 0, width: stickPanWidth, height: stickPanHeight)
         
         // Add a vertical line in the center to make it look like a handle
         let lineLayer1 = CALayer()
@@ -183,20 +196,24 @@ private extension ControlView {
         if gesture.state == .began {
             isDragging = true
             overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
-        }
-        
-        let newX = max(stickPanWidth / 2, min(overlayView.frame.maxX, overlayView.frame.minX + translation.x))
-        let newWidth = overlayView.frame.maxX - newX
-        overlayView.frame = CGRect(
-            x: newX,
-            y: overlayView.frame.minY,
-            width: newWidth,
-            height: overlayView.frame.height
-        )
-        
-        gesture.setTranslation(.zero, in: self)
-        
-        if gesture.state == .ended {
+        } else if gesture.state == .changed {
+            // Calculate new left edge position
+            let newLeftX = max(stickPanWidth/2, min(overlayView.frame.maxX - stickPanWidth, leftHandleView.center.x + translation.x))
+            
+            // Update overlay frame
+            let newWidth = overlayView.frame.maxX - newLeftX
+            overlayView.frame = CGRect(
+                x: newLeftX,
+                y: overlayView.frame.minY,
+                width: newWidth,
+                height: overlayView.frame.height
+            )
+            
+            // Update handle position
+            leftHandleView.center = CGPoint(x: newLeftX, y: leftHandleView.center.y)
+            
+            gesture.setTranslation(.zero, in: self)
+        } else if gesture.state == .ended {
             isDragging = false
             UIView.animate(withDuration: 0.2) {
                 self.overlayView.backgroundColor = .blue.withAlphaComponent(0.3)
@@ -211,22 +228,24 @@ private extension ControlView {
         if gesture.state == .began {
             isDragging = true
             overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
-        }
-        
-        let minWidth = 0.0
-        let maxWidth = bounds.width - stickPanWidth / 2 - overlayView.frame.minX
-        let newWidth = max(minWidth, min(maxWidth, overlayView.frame.width + translation.x))
-        
-        overlayView.frame = CGRect(
-            x: overlayView.frame.minX,
-            y: overlayView.frame.minY,
-            width: newWidth,
-            height: overlayView.frame.height
-        )
-        
-        gesture.setTranslation(.zero, in: self)
-        
-        if gesture.state == .ended {
+        } else if gesture.state == .changed {
+            // Calculate new right edge position
+            let newRightX = min(bounds.width - stickPanWidth/2, max(overlayView.frame.minX + stickPanWidth, rightHandleView.center.x + translation.x))
+            
+            // Update overlay frame
+            let newWidth = newRightX - overlayView.frame.minX
+            overlayView.frame = CGRect(
+                x: overlayView.frame.minX,
+                y: overlayView.frame.minY,
+                width: newWidth,
+                height: overlayView.frame.height
+            )
+            
+            // Update handle position
+            rightHandleView.center = CGPoint(x: newRightX, y: rightHandleView.center.y)
+            
+            gesture.setTranslation(.zero, in: self)
+        } else if gesture.state == .ended {
             isDragging = false
             UIView.animate(withDuration: 0.2) {
                 self.overlayView.backgroundColor = .blue.withAlphaComponent(0.3)
@@ -241,20 +260,21 @@ private extension ControlView {
         if gesture.state == .began {
             isDragging = true
             overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
-        }
-        
-        // Calculate new position, ensuring the overlay stays within bounds
-        let newX = max(stickPanWidth / 2 , min(bounds.width - stickPanWidth/2 - overlayView.frame.width, overlayView.frame.minX + translation.x))
-        overlayView.frame = CGRect(
-            x: newX,
-            y: overlayView.frame.minY,
-            width: overlayView.frame.width,
-            height: overlayView.frame.height
-        )
-        
-        gesture.setTranslation(.zero, in: self)
-        
-        if gesture.state == .ended {
+        } else if gesture.state == .changed {
+            // Calculate new position, ensuring the overlay stays within bounds
+            let newX = max(stickPanWidth/2, min(bounds.width - stickPanWidth/2 - overlayView.frame.width, overlayView.frame.minX + translation.x))
+            overlayView.frame = CGRect(
+                x: newX,
+                y: overlayView.frame.minY,
+                width: overlayView.frame.width,
+                height: overlayView.frame.height
+            )
+            
+            // Update handle positions
+            updateHandlePositions()
+            
+            gesture.setTranslation(.zero, in: self)
+        } else if gesture.state == .ended {
             isDragging = false
             UIView.animate(withDuration: 0.2) {
                 self.overlayView.backgroundColor = .blue.withAlphaComponent(0.3)
@@ -263,11 +283,73 @@ private extension ControlView {
         }
     }
     
+    @objc func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
+        if gesture.state == .began {
+            isDragging = true
+            overlayView.backgroundColor = .blue.withAlphaComponent(0.4)
+        } else if gesture.state == .changed {
+            // Get the pinch location
+            let pinchLocation = gesture.location(in: self)
+            
+            // Calculate how much of the overlay is on each side of the pinch point
+            let leftProportion = (pinchLocation.x - overlayView.frame.minX) / overlayView.frame.width
+            let rightProportion = 1 - leftProportion
+            
+            // Calculate new width
+            let newWidth = min(bounds.width, max(stickPanWidth * 2, overlayView.frame.width * gesture.scale))
+            
+            // Calculate how much the left and right edges should move
+            let leftEdgeMove = (newWidth - overlayView.frame.width) * leftProportion
+            let rightEdgeMove = (newWidth - overlayView.frame.width) * rightProportion
+            
+            // Calculate new left position, ensuring it stays within bounds
+            var newLeftX = overlayView.frame.minX - leftEdgeMove
+            newLeftX = max(stickPanWidth/2, min(bounds.width - stickPanWidth - newWidth, newLeftX))
+            
+            // Update overlay frame
+            overlayView.frame = CGRect(
+                x: newLeftX,
+                y: overlayView.frame.minY,
+                width: newWidth,
+                height: overlayView.frame.height
+            )
+            
+            // Update handle positions
+            updateHandlePositions()
+            
+            // Reset scale
+            gesture.scale = 1.0
+        } else if gesture.state == .ended {
+            isDragging = false
+            UIView.animate(withDuration: 0.2) {
+                self.overlayView.backgroundColor = .blue.withAlphaComponent(0.3)
+            }
+            notifyRangeChange()
+        }
+    }
+    
+    @objc func handleTapGesture(_ gesture: UITapGestureRecognizer) {
+        let tapLocation = gesture.location(in: self)
+        let overlayWidth = overlayView.frame.width
+
+        // Calculate new X position for the overlay, ensuring it stays within bounds
+        var newX = tapLocation.x - overlayWidth / 2
+        newX = max(stickPanWidth/2, min(bounds.width - stickPanWidth - overlayWidth, newX))
+
+        // Animate the movement of the overlay view to the tapped position
+        UIView.animate(withDuration: 0.25) {
+            self.overlayView.frame.origin.x = newX
+            self.updateHandlePositions()
+        }
+
+        notifyRangeChange()
+    }
+    
     private func notifyRangeChange() {
         guard !data.isEmpty else { return }
         
-        let totalWidth = bounds.width - stickPanWidth
-        let startPercentage = (overlayView.frame.minX - stickPanWidth/2) / totalWidth
+        let totalWidth = bounds.width
+        let startPercentage = overlayView.frame.minX / totalWidth
         let endPercentage = overlayView.frame.maxX / totalWidth
         
         let startIndex = Int(startPercentage * Double(data.count))
