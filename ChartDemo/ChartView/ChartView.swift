@@ -113,6 +113,8 @@ private extension ChartView {
     // Update Tick mark label X Axis
     func updateTickMarksAfterChangeData() {
         DispatchQueue.main.async {
+            self.getXLabelPositions()
+
 //            let (positions, labels) = self.getSelectedXAxisPositions()
             self.tickMarksView.tickPositions = self.tickPositions
             self.tickMarksView.tickLabels = self.tickLabel
@@ -322,10 +324,10 @@ extension ChartView {
         leftAxis.gridColor = UIColor.lightGray.withAlphaComponent(0.5)
         leftAxis.drawBottomYLabelEntryEnabled = false
         leftAxis.drawTopYLabelEntryEnabled = false
-
         // Điều chỉnh để các nhãn thẳng hàng
         leftAxis.forceLabelsEnabled = true
         leftAxis.granularity = 0.05
+        leftAxis.axisMinLabels = 3
 
         // Configure Right Y-Axis (Index)
         let rightAxis = chartView.rightAxis
@@ -333,10 +335,9 @@ extension ChartView {
         rightAxis.labelTextColor = UIColor(red: 196/255, green: 26/255, blue: 22/255, alpha: 1)
         rightAxis.drawGridLinesEnabled = true
         rightAxis.forceLabelsEnabled = true
-
+        rightAxis.axisMinLabels = 3
         rightAxis.drawBottomYLabelEntryEnabled = false
         rightAxis.drawTopYLabelEntryEnabled = false
-
     }
 
     func configureChartData() {
@@ -355,12 +356,10 @@ extension ChartView {
         peDataSet.axisDependency = .left
         peDataSet.drawCirclesEnabled = false
         peDataSet.drawValuesEnabled = false
-        peDataSet.mode = .cubicBezier
+        peDataSet.mode = .linear
         peDataSet.highlightEnabled = true
         peDataSet.setColor(peDataSetColor)
         peDataSet.lineWidth = 0.5
-//        peDataSet.fillAlpha = 65/255
-//        peDataSet.fillColor = UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1)
         peDataSet.highlightColor = .black.withAlphaComponent(0.8)
         peDataSet.drawHorizontalHighlightIndicatorEnabled = false
         peDataSet.drawVerticalHighlightIndicatorEnabled = true
@@ -371,12 +370,10 @@ extension ChartView {
         indexDataSet.axisDependency = .right
         indexDataSet.setColor(indexDataSetColor)
         indexDataSet.lineWidth = 0.5
-//        indexDataSet.fillAlpha = 65/255
-//        indexDataSet.fillColor = UIColor(red: 51/255, green: 181/255, blue: 229/255, alpha: 1)
         indexDataSet.highlightColor = .black.withAlphaComponent(0.8)
         indexDataSet.drawCirclesEnabled = false
         indexDataSet.drawValuesEnabled = false
-        indexDataSet.mode = .cubicBezier
+        indexDataSet.mode = .linear
         indexDataSet.highlightEnabled = true
         indexDataSet.drawHorizontalHighlightIndicatorEnabled = false
         indexDataSet.drawVerticalHighlightIndicatorEnabled = true
@@ -420,7 +417,8 @@ extension ChartView {
     }
 
     func updateChart(with filteredData: [ChartPointModel]) {
-        guard !filteredData.isEmpty else { return }
+        // requires more one item  to cal min max. else min = max -> crash
+        guard filteredData.count > 1 else { return }
         // remove highlight point when update chartview
         handleEndHighlight()
         
@@ -457,7 +455,7 @@ extension ChartView {
             
             let minIndexWithPadding = minIndex - indexRange
             let maxIndexWithPadding = maxIndex + indexRange
-            
+            print("pe: \(maxPe - minPe) - index: \(maxIndex - minIndex)")
             // Cập nhật phạm vi trục Y
             chartView.leftAxis.axisMinimum = Double(minPeWithPadding)
             chartView.leftAxis.axisMaximum = Double(maxPeWithPadding)
@@ -469,16 +467,14 @@ extension ChartView {
         // Cập nhật phạm vi trục X
         if let minX = filteredData.min(by: { $0.timeStamp < $1.timeStamp })?.timeStamp,
            let maxX = filteredData.max(by: { $0.timeStamp < $1.timeStamp })?.timeStamp {
+            print("x: \(maxX - minX)")
             chartView.xAxis.axisMinimum = Double(minX)
             chartView.xAxis.axisMaximum = Double(maxX)
         }
-//        chartView.move.animate(xAxisDuration: 0.5, yAxisDuration: 0.5)
 
         // Cập nhật dữ liệu biểu đồ và reset view
         chartView.notifyDataSetChanged()
         chartView.fitScreen()
-        
-        getXLabelPositions()
         
         // Cập nhật tick marks
         updateTickMarksAfterChangeData()
@@ -489,7 +485,7 @@ extension ChartView {
 
         // Lấy các giá trị hiển thị trên trục X
         let xEntries = chartView.xAxis.entries
-        tickLabel = xEntries.map { formattedDate(Int64($0)) }
+        tickLabel = formatTimestamps(xEntries.map{Int64($0)})
         // Sử dụng Transformer để chuyển đổi giá trị X thành tọa độ
         let transformer = chartView.getTransformer(forAxis: .left)
 
@@ -586,6 +582,7 @@ extension ChartView {
             print("Zôm end \(getZoomedData().count)")
             let filteredData = getZoomedData()
             updateChart(with: filteredData)
+            controlView.updateOverlay(filteredData)
         } else if gesture.state == .changed {
             let location = gesture.location(in: self)
             let scale = gesture.scale

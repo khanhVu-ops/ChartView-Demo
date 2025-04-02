@@ -18,7 +18,7 @@ class ViewController: UIViewController {
     
     override func viewDidLoad() {
         super.viewDidLoad()
-        rotateViewLanscape()
+//        rotateViewLanscape()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             self.setUpUI()
         }
