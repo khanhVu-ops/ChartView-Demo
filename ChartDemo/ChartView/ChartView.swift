@@ -305,8 +305,6 @@ extension ChartView {
         // Enable highlighting on touch
         chartView.highlightPerDragEnabled = true
         chartView.highlightPerTapEnabled = true
-        chartView.dragXEnabled = true
-        chartView.dragYEnabled = false
         // Configure X-Axis
         let xAxis = chartView.xAxis
         xAxis.labelPosition = .bottom
@@ -576,21 +574,23 @@ extension ChartView {
     }
     
     @objc func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
-        
-
-        if gesture.state == .ended || gesture.state == .cancelled {
-            print("Zôm end \(getZoomedData().count)")
+        switch gesture.state {
+        case .began:
+            chartView.highlightPerDragEnabled = false
+            handleEndHighlight()
+        case .changed:
+            let location = gesture.location(in: self)
+            let scale = gesture.scale
+            chartView.zoom(scaleX: scale, scaleY: 1, x: location.x, y: location.y)
+        case .ended, .cancelled:
+            chartView.highlightPerDragEnabled = true
             let filteredData = getZoomedData()
             updateChart(with: filteredData)
             controlView.updateOverlay(filteredData)
-        } else if gesture.state == .changed {
-            let location = gesture.location(in: self)
-            let scale = gesture.scale
-            print("before zoom")
-            chartView.zoom(scaleX: scale, scaleY: 1, x: location.x, y: location.y)
-            gesture.scale = 1
-            print("after zoom")
+        default: break
         }
+        
+        gesture.scale = 1
     }
     
     func getZoomedData() -> [ChartPointModel] {
